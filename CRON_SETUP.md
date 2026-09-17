@@ -9,32 +9,38 @@ Canonical repository:
 
 ## Where to deploy
 
-Deploy this repository on **Render as a separate Cron Job**. If the Moolah API
-is already on Render, keep the worker in the same Render workspace and region,
-but do not add it to the API web service.
+Run this worker with **GitHub Actions** in the private `moolah-worker`
+repository. Render is not required.
 
-The two Render services are:
+The scheduled workflow is:
 
 ```text
-Moolah API       Render Web Service
-Auto-post worker Render Cron Job
+.github/workflows/auto-post.yml
 ```
 
-The Cron Job starts on schedule, calls the API once, and exits. Render prevents
-overlapping runs of the same job. Schedules use UTC. Render currently documents
-a minimum charge of $1 per cron job service, with runtime billed by active
-execution time.
+It runs at minute 17 of every hour in UTC, calls the API once, and exits.
+Minute 17 avoids GitHub's documented higher load at the start of each hour.
+GitHub can still delay scheduled workflows during heavy load, so this is
+appropriate for ledger recording but not time-critical payment execution.
 
-Official Render documentation:
-<https://render.com/docs/cronjobs>
+Private repositories consume the owner's included GitHub Actions minutes.
+GitHub Free currently includes 2,000 minutes per month. An hourly job has about
+720 invocations in a 30-day month, plus CI usage, so it is expected to fit the
+included allowance if each run is billed at approximately one minute. This is
+an estimate, not a guarantee.
+
+Official GitHub documentation:
+
+- <https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule>
+- <https://docs.github.com/en/billing/concepts/product-billing/github-actions>
 
 ## Required deployment order
 
 1. Deploy the Moolah API migration and API code.
 2. Configure the shared worker secret on the API.
-3. Deploy this worker as a scheduled container.
-4. Run it manually once.
-5. Enable the hourly cron schedule.
+3. Add the required GitHub Actions repository secrets.
+4. Run the workflow manually once.
+5. Leave the hourly schedule enabled on the default branch.
 6. Enable Auto-post on a test recurring item.
 
 Do not enable Auto-post for users before the worker's manual run succeeds.
@@ -192,77 +198,56 @@ docker run --rm \
 
 ## 6. Create the cron job
 
-Deploy <https://github.com/santos16426/moolah-worker> as a scheduled Docker
-job using the repository's `Dockerfile`.
-
-Use:
+The repository already contains the GitHub Actions schedule:
 
 ```cron
-0 * * * *
+17 * * * *
 ```
 
-This runs once at the start of every hour. Use the image's default command:
+It also supports manual runs through `workflow_dispatch`.
+
+### Add GitHub repository secrets
+
+1. Open <https://github.com/santos16426/moolah-worker>.
+2. Select **Settings**.
+3. Select **Secrets and variables**, then **Actions**.
+4. Under **Repository secrets**, add:
 
 ```text
-node dist/index.js
+Name: MOOLAH_API_URL
+Secret: https://YOUR_API_HOST
 ```
 
-### Render setup
-
-1. Open the Render Dashboard.
-2. Select **New**, then **Cron Job**.
-3. Connect the private GitHub repository
-   `https://github.com/santos16426/moolah-worker`.
-4. Configure:
+5. Add the shared worker secret:
 
 ```text
-Name: moolah-auto-post-production
-Branch: main
-Region: same region as the Moolah API
-Runtime: Docker
-Dockerfile path: ./Dockerfile
-Schedule: 0 * * * *
+Name: AUTO_POST_WORKER_SECRET
+Secret: <the exact value configured on the Moolah API>
 ```
 
-5. Use the smallest appropriate compute plan.
-6. Leave **Docker Command** empty. Render will use the Dockerfile command:
+Do not include `/internal/jobs/recurring-auto-post` in `MOOLAH_API_URL`; use
+only the API origin. Do not store these values as GitHub repository variables,
+because variables are not intended for secrets.
 
-```text
-node dist/index.js
-```
+### Run it manually
 
-7. In the Cron Job's **Environment** page, add:
+1. Open the repository's **Actions** tab.
+2. Select **Recurring Auto-post**.
+3. Select **Run workflow**.
+4. Keep branch `main`.
+5. Select **Run workflow** and open the new run.
+6. Confirm every step passes and `npm start` logs `auto_post_completed`.
+7. Complete the end-to-end acceptance test below.
 
-```dotenv
-NODE_ENV=production
-MOOLAH_API_URL=https://YOUR_RENDER_API_HOST
-AUTO_POST_WORKER_SECRET=replace-with-generated-secret
-WORKER_TIMEOUT_MS=15000
-WORKER_MAX_ATTEMPTS=3
-```
+The schedule is active whenever:
 
-8. On the Moolah API Render service, add the exact same secret:
+- `.github/workflows/auto-post.yml` exists on the default branch;
+- GitHub Actions is enabled for the repository;
+- both repository secrets exist;
+- the Moolah API is reachable over HTTPS.
 
-```dotenv
-AUTO_POST_WORKER_SECRET=replace-with-the-same-generated-secret
-```
-
-9. Save and deploy the API first.
-10. Deploy the Cron Job.
-11. Open the Cron Job's **Runs** page and select **Trigger Run**.
-12. Confirm the run exits successfully with `auto_post_completed`.
-13. Complete the end-to-end acceptance test below.
-
-You can place `AUTO_POST_WORKER_SECRET` in a private Render Environment Group
-attached to both services to prevent values drifting. Keep
-`MOOLAH_API_URL`, timeout, and retry settings on the Cron Job only.
-
-Do not add the secret to Docker `ARG` instructions. Render supplies configured
-environment values to the container at runtime; the Dockerfile does not need
-or read secrets while building.
-
-For another host, use its run-to-completion or scheduled-container product.
-Do not deploy this repository as an always-on HTTP service.
+The workflow uses a concurrency group without cancellation, so a second run
+waits instead of cancelling an active Auto-post invocation.
 
 ## 7. End-to-end acceptance test
 
@@ -298,19 +283,20 @@ Common failures:
 
 To rotate the secret without losing scheduled entries:
 
-1. Pause the cron schedule.
+1. Open **Actions**, select **Recurring Auto-post**, open its menu, and select
+   **Disable workflow**.
 2. Generate a new secret.
 3. Update the API secret and deploy/restart the API.
-4. Update the worker secret.
-5. Run the worker manually.
-6. Resume the schedule.
+4. Update the `AUTO_POST_WORKER_SECRET` GitHub Actions repository secret.
+5. Re-enable **Recurring Auto-post**.
+6. Run the workflow manually.
 
 The API's idempotency constraint prevents duplicate posting when a run is
 retried.
 
 ## Rollback
 
-1. Disable the cron schedule.
+1. Disable **Recurring Auto-post** from the GitHub Actions tab.
 2. Disable Auto-post on affected recurring items.
 3. Keep the additive database migration applied.
 4. Rotate the secret if compromise is suspected.

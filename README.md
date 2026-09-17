@@ -69,20 +69,21 @@ never include the bearer secret.
 
 ## Deployment
 
-Deploy this repository as a scheduled container, not an always-on web service.
-Use the image's default command and an hourly schedule:
+Use the included GitHub Actions workflow:
 
 ```cron
-0 * * * *
+17 * * * *
 ```
 
 Roll out in this order:
 
 1. Apply the API migration.
 2. Configure `AUTO_POST_WORKER_SECRET` on the API and deploy it.
-3. Configure `MOOLAH_API_URL` and the same secret on this worker.
-4. Run the worker manually and confirm an `auto_post_completed` log.
-5. Enable the hourly schedule.
+3. Add `MOOLAH_API_URL` and `AUTO_POST_WORKER_SECRET` as GitHub Actions
+   repository secrets.
+4. Manually run **Recurring Auto-post** from the repository's Actions tab.
+5. Confirm an `auto_post_completed` log; the hourly schedule is active from
+   the default branch.
 6. Enable Auto-post on a test recurring item due today and verify one Activity
    entry.
 7. Run the worker again and verify that no duplicate entry appears.

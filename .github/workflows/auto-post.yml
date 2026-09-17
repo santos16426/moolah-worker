@@ -1,0 +1,33 @@
+name: Recurring Auto-post
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recurring-auto-post
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm start
+        env:
+          NODE_ENV: production
+          MOOLAH_API_URL: ${{ secrets.MOOLAH_API_URL }}
+          AUTO_POST_WORKER_SECRET: ${{ secrets.AUTO_POST_WORKER_SECRET }}
+          WORKER_TIMEOUT_MS: "15000"
+          WORKER_MAX_ATTEMPTS: "3"
