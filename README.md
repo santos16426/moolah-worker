@@ -6,6 +6,9 @@ The worker does not connect to PostgreSQL and cannot move money. It sends one
 authenticated request to the Moolah API, which remains the only owner of
 authorization, idempotency, recurrence advancement, and ledger writes.
 
+Complete deployment, cron, environment, secret rotation, and rollback steps:
+[`CRON_SETUP.md`](CRON_SETUP.md).
+
 ## Runtime contract
 
 Required environment variables:
