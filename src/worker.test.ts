@@ -118,7 +118,9 @@ describe("runAutoPostWorker", () => {
     let slept = false;
     async function fetchUnauthorized(): Promise<Response> {
       calls += 1;
-      return response(401, { error: "unauthorized" });
+      return response(401, {
+        error: { code: "UNAUTHORIZED", message: "Invalid credentials" },
+      });
     }
 
     await assert.rejects(
@@ -131,7 +133,9 @@ describe("runAutoPostWorker", () => {
           },
         }),
       (error: unknown) =>
-        error instanceof AutoPostWorkerError && error.statusCode === 401
+        error instanceof AutoPostWorkerError &&
+        error.statusCode === 401 &&
+        error.apiErrorCode === "UNAUTHORIZED"
     );
     assert.equal(calls, 1);
     assert.equal(slept, false);

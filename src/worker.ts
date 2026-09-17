@@ -21,12 +21,14 @@ export interface WorkerDependencies {
 export class AutoPostWorkerError extends Error {
   readonly statusCode: number | undefined;
   readonly retryAfterMs: number | undefined;
+  readonly apiErrorCode: string | undefined;
 
   constructor(
     message: string,
     options: {
       statusCode?: number;
       retryAfterMs?: number;
+      apiErrorCode?: string;
       cause?: Error;
     } = {}
   ) {
@@ -34,6 +36,7 @@ export class AutoPostWorkerError extends Error {
     this.name = "AutoPostWorkerError";
     this.statusCode = options.statusCode;
     this.retryAfterMs = options.retryAfterMs;
+    this.apiErrorCode = options.apiErrorCode;
   }
 }
 
@@ -58,6 +61,23 @@ function parseRetryAfter(value: string | null): number | undefined {
   const dateMs = Date.parse(value);
   if (Number.isNaN(dateMs)) return undefined;
   return Math.min(Math.max(dateMs - Date.now(), 0), 30_000);
+}
+
+async function readApiErrorCode(response: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.json();
+    if (
+      !isRecord(body) ||
+      !isRecord(body.error) ||
+      typeof body.error.code !== "string" ||
+      !/^[A-Z0-9_]{1,64}$/.test(body.error.code)
+    ) {
+      return undefined;
+    }
+    return body.error.code;
+  } catch {
+    return undefined;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -100,11 +120,13 @@ async function executeAttempt(
       const retryAfterMs = parseRetryAfter(
         response.headers.get("retry-after")
       );
+      const apiErrorCode = await readApiErrorCode(response);
       throw new AutoPostWorkerError(
         `Moolah API returned HTTP ${response.status}`,
         {
           statusCode: response.status,
           ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+          ...(apiErrorCode !== undefined ? { apiErrorCode } : {}),
         }
       );
     }
@@ -189,6 +211,7 @@ export async function runAutoPostWorker(
           attempt,
           durationMs: Date.now() - startedAt,
           statusCode: workerError.statusCode,
+          apiErrorCode: workerError.apiErrorCode,
           message: workerError.message,
         });
         throw workerError;
