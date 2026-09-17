@@ -7,6 +7,27 @@ only the Moolah API.
 Canonical repository:
 <https://github.com/santos16426/moolah-worker>
 
+## Where to deploy
+
+Deploy this repository on **Render as a separate Cron Job**. If the Moolah API
+is already on Render, keep the worker in the same Render workspace and region,
+but do not add it to the API web service.
+
+The two Render services are:
+
+```text
+Moolah API       Render Web Service
+Auto-post worker Render Cron Job
+```
+
+The Cron Job starts on schedule, calls the API once, and exits. Render prevents
+overlapping runs of the same job. Schedules use UTC. Render currently documents
+a minimum charge of $1 per cron job service, with runtime billed by active
+execution time.
+
+Official Render documentation:
+<https://render.com/docs/cronjobs>
+
 ## Required deployment order
 
 1. Deploy the Moolah API migration and API code.
@@ -186,23 +207,59 @@ This runs once at the start of every hour. Use the image's default command:
 node dist/index.js
 ```
 
-### Railway
+### Render setup
 
-1. Create a new service from the GitHub repository.
-2. Select Dockerfile deployment.
-3. Add all production worker environment variables.
-4. Configure the service as a Cron Job with `0 * * * *`.
-5. Trigger one manual run and inspect its JSON logs.
-6. Do not run a second always-on replica.
+1. Open the Render Dashboard.
+2. Select **New**, then **Cron Job**.
+3. Connect the private GitHub repository
+   `https://github.com/santos16426/moolah-worker`.
+4. Configure:
 
-### Render
+```text
+Name: moolah-auto-post-production
+Branch: main
+Region: same region as the Moolah API
+Runtime: Docker
+Dockerfile path: ./Dockerfile
+Schedule: 0 * * * *
+```
 
-1. Create a **Cron Job** from the GitHub repository.
-2. Select the Docker runtime.
-3. Add all production worker environment variables.
-4. Set schedule to `0 * * * *`.
-5. Use the Docker image's default command.
-6. Run the job manually before enabling the schedule.
+5. Use the smallest appropriate compute plan.
+6. Leave **Docker Command** empty. Render will use the Dockerfile command:
+
+```text
+node dist/index.js
+```
+
+7. In the Cron Job's **Environment** page, add:
+
+```dotenv
+NODE_ENV=production
+MOOLAH_API_URL=https://YOUR_RENDER_API_HOST
+AUTO_POST_WORKER_SECRET=replace-with-generated-secret
+WORKER_TIMEOUT_MS=15000
+WORKER_MAX_ATTEMPTS=3
+```
+
+8. On the Moolah API Render service, add the exact same secret:
+
+```dotenv
+AUTO_POST_WORKER_SECRET=replace-with-the-same-generated-secret
+```
+
+9. Save and deploy the API first.
+10. Deploy the Cron Job.
+11. Open the Cron Job's **Runs** page and select **Trigger Run**.
+12. Confirm the run exits successfully with `auto_post_completed`.
+13. Complete the end-to-end acceptance test below.
+
+You can place `AUTO_POST_WORKER_SECRET` in a private Render Environment Group
+attached to both services to prevent values drifting. Keep
+`MOOLAH_API_URL`, timeout, and retry settings on the Cron Job only.
+
+Do not add the secret to Docker `ARG` instructions. Render supplies configured
+environment values to the container at runtime; the Dockerfile does not need
+or read secrets while building.
 
 For another host, use its run-to-completion or scheduled-container product.
 Do not deploy this repository as an always-on HTTP service.
